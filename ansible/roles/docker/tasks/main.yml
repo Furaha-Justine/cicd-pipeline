@@ -1,0 +1,25 @@
+---
+- name: Update dnf packages
+  ansible.builtin.raw: dnf update -y
+
+- name: Install Docker
+  ansible.builtin.raw: dnf install -y docker
+
+- name: Start and enable Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Add ec2-user to docker group
+  ansible.builtin.user:
+    name: ec2-user
+    groups: docker
+    append: true
+
+- name: Refresh SSH connection to apply docker group
+  ansible.builtin.meta: reset_connection
+
+- name: Verify Docker
+  ansible.builtin.command: docker info
+  changed_when: false

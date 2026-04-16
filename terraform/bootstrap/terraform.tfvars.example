@@ -1,0 +1,4 @@
+# Copy to terraform.tfvars and fill in your values
+bucket_name         = "cicd-demo-tfstate-yourname"   # must be globally unique
+dynamodb_table_name = "terraform-state-lock"
+aws_region          = "us-east-1"

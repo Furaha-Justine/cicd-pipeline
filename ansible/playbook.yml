@@ -1,0 +1,56 @@
+---
+# ── Play 1: Bootstrap on ALL hosts ────────────────────────────────────────────
+- name: Bootstrap
+  hosts: all
+  become: true
+  gather_facts: false
+
+  tasks:
+    - name: Wait for SSH
+      ansible.builtin.raw: echo "SSH OK"
+      retries: 12
+      delay: 10
+      register: ssh_result
+      until: ssh_result.rc == 0
+
+  roles:
+    - bootstrap
+
+# ── Play 2: Configure Jenkins EC2 ─────────────────────────────────────────────
+- name: Configure Jenkins EC2
+  hosts: jenkins
+  become: true
+  gather_facts: true
+
+  roles:
+    - jenkins
+
+  post_tasks:
+    - name: Restart Jenkins to apply group changes
+      ansible.builtin.service:
+        name: jenkins
+        state: restarted
+
+    - name: Wait for Jenkins to come back up
+      ansible.builtin.wait_for:
+        port: 8080
+        delay: 10
+        timeout: 60
+
+    - name: Print Jenkins URL
+      ansible.builtin.debug:
+        msg: "Jenkins ready at http://{{ ansible_host }}:8080"
+
+# ── Play 3: Configure App EC2 ─────────────────────────────────────────────────
+- name: Configure App EC2
+  hosts: app_servers
+  become: true
+  gather_facts: true
+
+  roles:
+    - docker
+
+  post_tasks:
+    - name: Print App server ready
+      ansible.builtin.debug:
+        msg: "App EC2 ready at {{ ansible_host }}"

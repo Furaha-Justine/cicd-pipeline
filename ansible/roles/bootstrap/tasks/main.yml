@@ -1,0 +1,7 @@
+---
+# AL2023 ships with Python 3.9 by default — no need to build from source
+- name: Verify Python 3.9 is available
+  ansible.builtin.raw: python3 --version
+
+- name: Install Python 3.9 pip
+  ansible.builtin.raw: dnf install -y python3-pip

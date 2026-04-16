@@ -1,0 +1,183 @@
+---
+
+
+- name: Configure Jenkins plugins, credentials and pipeline job
+  hosts: jenkins
+  become: true
+  gather_facts: false
+
+  vars:
+    jenkins_url: "http://localhost:8080"
+
+  tasks:
+
+    - name: Wait for Jenkins to be fully up
+      ansible.builtin.wait_for:
+        port: 8080
+        delay: 10
+        timeout: 120
+
+    - name: Get Jenkins admin password
+      ansible.builtin.slurp:
+        src: /var/lib/jenkins/secrets/initialAdminPassword
+      register: admin_password_b64
+
+    - name: Set admin password fact
+      ansible.builtin.set_fact:
+        admin_pass: "{{ admin_password_b64.content | b64decode | trim }}"
+
+    # ── Complete setup wizard ──────────────────────────────────────────────────
+    - name: Skip setup wizard
+      ansible.builtin.raw: |
+        cat > /var/lib/jenkins/jenkins.install.UpgradeWizard.state << 'STATE'
+        2.0
+        STATE
+        chown jenkins:jenkins /var/lib/jenkins/jenkins.install.UpgradeWizard.state
+
+    - name: Restart Jenkins to apply wizard skip
+      ansible.builtin.raw: systemctl restart jenkins
+
+    - name: Wait for Jenkins to come back up after restart
+      ansible.builtin.wait_for:
+        port: 8080
+        delay: 15
+        timeout: 120
+
+    - name: Get crumb for CSRF
+      ansible.builtin.uri:
+        url: "{{ jenkins_url }}/crumbIssuer/api/json"
+        method: GET
+        user: admin
+        password: "{{ admin_pass }}"
+        force_basic_auth: true
+        return_content: true
+        status_code: 200
+      register: crumb_response
+
+    - name: Set crumb facts
+      ansible.builtin.set_fact:
+        crumb_field: "{{ crumb_response.json.crumbRequestField }}"
+        crumb_value: "{{ crumb_response.json.crumb }}"
+
+    - name: Set Jenkins URL via config file
+      ansible.builtin.raw: |
+        mkdir -p /var/lib/jenkins
+        cat > /var/lib/jenkins/jenkins.model.JenkinsLocationConfiguration.xml << 'XMLEOF'
+        <?xml version='1.1' encoding='UTF-8'?>
+        <jenkins.model.JenkinsLocationConfiguration>
+          <adminAddress>address not configured yet &lt;nobody@nowhere&gt;</adminAddress>
+          <jenkinsUrl>http://localhost:8080/</jenkinsUrl>
+        </jenkins.model.JenkinsLocationConfiguration>
+        XMLEOF
+        chown jenkins:jenkins /var/lib/jenkins/jenkins.model.JenkinsLocationConfiguration.xml
+
+    - name: Restart Jenkins to apply URL config
+      ansible.builtin.raw: systemctl restart jenkins
+
+    - name: Wait for Jenkins after URL config restart
+      ansible.builtin.wait_for:
+        port: 8080
+        delay: 15
+        timeout: 120
+
+    - name: Download Jenkins CLI jar
+      ansible.builtin.get_url:
+        url: "{{ jenkins_url }}/jnlpJars/jenkins-cli.jar"
+        dest: /tmp/jenkins-cli.jar
+        mode: '0644'
+
+   
+    - name: Install required Jenkins plugins
+      ansible.builtin.shell: >
+        java -jar /tmp/jenkins-cli.jar
+        -s {{ jenkins_url }}
+        -auth admin:{{ admin_pass }}
+        install-plugin
+        workflow-aggregator
+        git
+        credentials-binding
+        docker-workflow
+        ssh-agent
+        junit
+        htmlpublisher
+        ansicolor
+        -deploy
+      changed_when: true
+
+    - name: Wait for plugins to install and Jenkins to restart
+      ansible.builtin.wait_for:
+        port: 8080
+        delay: 30
+        timeout: 120
+
+    - name: Ensure Jenkins SSH directory exists
+      ansible.builtin.file:
+        path: /var/lib/jenkins/.ssh
+        state: directory
+        owner: jenkins
+        group: jenkins
+        mode: '0700'
+
+    - name: Copy EC2 SSH private key to Jenkins
+      ansible.builtin.copy:
+        src: "{{ key_path }}"
+        dest: /var/lib/jenkins/.ssh/ec2_key.pem
+        owner: jenkins
+        group: jenkins
+        mode: '0600'
+
+    - name: Render credentials Groovy script
+      ansible.builtin.template:
+        src: templates/create_credentials.groovy.j2
+        dest: /tmp/create_credentials.groovy
+        mode: '0600'
+
+    - name: Create Jenkins credentials
+      ansible.builtin.shell: >
+        java -jar /tmp/jenkins-cli.jar
+        -s {{ jenkins_url }}
+        -auth admin:{{ admin_pass }}
+        groovy = < /tmp/create_credentials.groovy
+      changed_when: true
+
+    - name: Render pipeline job XML
+      ansible.builtin.template:
+        src: templates/pipeline_job.xml.j2
+        dest: /tmp/pipeline_job.xml
+        mode: '0644'
+
+    - name: Delete existing pipeline job if exists
+      ansible.builtin.shell: >
+        java -jar /tmp/jenkins-cli.jar
+        -s {{ jenkins_url }}
+        -auth admin:{{ admin_pass }}
+        delete-job cicd-demo-pipeline
+      changed_when: true
+      failed_when: false
+
+    - name: Create pipeline job
+      ansible.builtin.shell: >
+        java -jar /tmp/jenkins-cli.jar
+        -s {{ jenkins_url }}
+        -auth admin:{{ admin_pass }}
+        create-job cicd-demo-pipeline < /tmp/pipeline_job.xml
+      changed_when: true
+
+    - name: Clean up sensitive temp files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /tmp/create_credentials.groovy
+        - /tmp/pipeline_job.xml
+
+    - name: Print Jenkins access details
+      ansible.builtin.debug:
+        msg:
+          - "================================================"
+          - "Jenkins URL : http://{{ ansible_host }}:8080"
+          - "Username    : admin"
+          - "Password    : {{ admin_pass }}"
+          - "Job         : cicd-demo-pipeline"
+          - "Next step   : open Jenkins and click Build Now"
+          - "================================================"

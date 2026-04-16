@@ -1,0 +1,13 @@
+{
+  "testEnvironment": "node",
+  "testMatch": ["**/tests/**/*.test.js"],
+  "collectCoverageFrom": ["index.js"],
+  "coverageReporters": ["lcov", "text"],
+  "reporters": [
+    "default",
+    ["jest-junit", {
+      "outputDirectory": "coverage",
+      "outputName": "junit.xml"
+    }]
+  ]
+}

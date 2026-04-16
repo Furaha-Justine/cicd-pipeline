@@ -1,0 +1,70 @@
+---
+- name: Update dnf packages
+  ansible.builtin.raw: dnf update -y
+
+- name: Install dependencies
+  ansible.builtin.raw: dnf install -y git unzip wget fontconfig
+
+# ── Java 21 ────────────────────────────────────────────────────────────────────
+- name: Install Java 21
+  ansible.builtin.raw: dnf install -y java-21-amazon-corretto-headless
+
+- name: Verify Java 21
+  ansible.builtin.raw: java -version
+
+# ── Jenkins ────────────────────────────────────────────────────────────────────
+- name: Add Jenkins repo
+  ansible.builtin.get_url:
+    url: https://pkg.jenkins.io/redhat-stable/jenkins.repo
+    dest: /etc/yum.repos.d/jenkins.repo
+    mode: '0644'
+
+- name: Import Jenkins GPG key
+  ansible.builtin.rpm_key:
+    key: https://pkg.jenkins.io/redhat-stable/jenkins.io-2023.key
+    state: present
+
+- name: Install Jenkins
+  ansible.builtin.raw: dnf install -y jenkins
+
+- name: Start and enable Jenkins
+  ansible.builtin.service:
+    name: jenkins
+    state: started
+    enabled: true
+
+# ── Docker ─────────────────────────────────────────────────────────────────────
+- name: Install Docker
+  ansible.builtin.raw: dnf install -y docker
+
+- name: Start and enable Docker
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+
+- name: Add ec2-user to docker group
+  ansible.builtin.user:
+    name: ec2-user
+    groups: docker
+    append: true
+
+- name: Add jenkins user to docker group
+  ansible.builtin.user:
+    name: jenkins
+    groups: docker
+    append: true
+
+- name: Refresh SSH connection to apply docker group
+  ansible.builtin.meta: reset_connection
+
+# ── Node.js 18 ─────────────────────────────────────────────────────────────────
+- name: Install Node.js 18
+  ansible.builtin.raw: dnf install -y nodejs
+
+- name: Verify Node.js
+  ansible.builtin.raw: node --version
+
+# ── AWS CLI v2 ─────────────────────────────────────────────────────────────────
+- name: Install AWS CLI v2
+  ansible.builtin.raw: dnf install -y awscli
